@@ -201,8 +201,8 @@ Bu durumlarda JET, Site'yi ve e-postaları önceden bildirimde bulunmaksızın e
 12.2. Tüketici, sözleşmenin kurulduğu tarihten itibaren **14 gün** içinde gerekçe göstermeden ve cezai şart ödemeden cayabilir. Cayma bildirimi info@jetbilisim.com.tr adresine, [KEP adresine] veya müşteri panelinden yapılır.
 
 12.3. Mesafeli Sözleşmeler Yönetmeliği m.15/1 uyarınca şu durumlarda cayma hakkı kullanılamaz:
-- a) (ğ) Cayma süresi bitmeden, tüketicinin **onayıyla ifasına başlanan** hizmetler.
-- b) (ç) Tüketicinin istekleri veya kişisel ihtiyaçları doğrultusunda hazırlanan hizmetler.
+- a) (h) Cayma süresi bitmeden, tüketicinin **onayıyla ifasına başlanan** hizmetler.
+- b) (ğ) Elektronik ortamda anında ifa edilen hizmetler ve tüketiciye anında teslim edilen gayrimaddi mallar (ör. anında tanımlanan eklenti ve lisanslar).
 
 JET, kuruluma başlamadan önce tüketiciden, cayma hakkını kaybedeceğini bilerek kurulumun başlatılmasına açık onay alır. Bu onay alınmadan kurulum cayma süresi içinde başlatılmaz.
 
@@ -320,7 +320,7 @@ Sipariş sisteminde otomatik doldurulacak:
 3. **Toplam fiyat (vergiler dahil):** [55.728,00 TL]. Yıllık yenileme bedeli: [....] TL + KDV.
 4. **Ödeme:** Kredi kartı (PayTR, taksitli) veya havale/EFT.
 5. **İfa:** Teslim süresi [10] iş günüdür. Süre, ödeme ve gerekli içeriklerin iletilmesiyle başlar.
-6. **Cayma hakkı:** 14 gün içinde gerekçe göstermeden cayabilirsiniz. Cayma süresi içinde, onayınızla kuruluma başlanırsa cayma hakkınızı kaybedersiniz (Mesafeli Sözleşmeler Yönetmeliği m.15/1-ğ).
+6. **Cayma hakkı:** 14 gün içinde gerekçe göstermeden cayabilirsiniz. Cayma süresi içinde, onayınızla kuruluma başlanırsa cayma hakkınızı kaybedersiniz (Mesafeli Sözleşmeler Yönetmeliği m.15/1-h).
 7. **Şikâyet ve itiraz:** info@jetbilisim.com.tr. Parasal sınırlar içinde Tüketici Hakem Heyeti, üzerinde Tüketici Mahkemesi yetkilidir.
 
 ---
