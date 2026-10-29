@@ -8,6 +8,7 @@ Kullanim:
     python bulut.py            # web arayuzu: http://127.0.0.1:8765
     python bulut.py cli        # terminalde sohbet
     python bulut.py --model qwen2.5-coder:14b
+    python bulut.py --proje C:\\projelerim\\site   # proje klasoru ile ac
 """
 
 import argparse
@@ -18,15 +19,22 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from proje import Project
+
 ROOT = Path(__file__).resolve().parent
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 DEFAULT_MODEL = os.environ.get("BULUT_MODEL", "qwen2.5-coder:7b")
 RUN_TIMEOUT = 20  # saniye
+NUM_CTX = int(os.environ.get("BULUT_CTX", "16384"))  # modelin baglam penceresi (token)
+
+PROJECT = None
+PROJECT_LOCK = threading.Lock()
 
 SYSTEM_PROMPT = """Sen "Bulut" adinda, kullanicinin kendi bilgisayarinda calisan uzman bir yazilim asistanisin.
 Uzmanlik alanlarin: PHP (8.x, Laravel, Symfony, Composer, PDO), Java (17+, Spring Boot, Maven, Gradle, JUnit)
@@ -41,6 +49,16 @@ Kurallar:
 - Hata ayiklarken once hatanin nedenini kisaca acikla, sonra duzeltilmis kodu ver.
 - Emin olmadigin konularda bunu acikca soyle; uydurma API veya kutuphane onerme.
 - Gereksiz uzun yazma; once cozum, sonra kisa aciklama."""
+
+PROJECT_PROMPT = """
+
+Kullanici bir proje klasoru acti. Asagida projenin yapisi ve soruyla ilgili dosyalar var.
+- Cevaplarini bu gercek koda dayandir; dosya yollarini ve satir numaralarini belirt.
+- Degisiklik onerirken hangi dosyanin neresinin degisecegini acikca yaz.
+- Projedeki mevcut stil, framework ve isimlendirmeye uy.
+- Ihtiyacin olan dosya asagida yoksa tahmin etme; kullanicidan @dosya/yolu ile eklemesini iste.
+
+"""
 
 
 # --------------------------------------------------------------------------- #
@@ -63,13 +81,62 @@ def list_models():
         return [m["name"] for m in json.load(r).get("models", [])]
 
 
-def chat_stream(model, messages):
-    """Ollama'dan gelen cevabi parca parca (str) dondurur."""
+def trim_history(messages, max_chars):
+    """Baglama sigmayacak kadar eski mesajlari atar (son mesaj hep kalir)."""
+    out, total = [], 0
+    for m in reversed(messages):
+        total += len(m.get("content", ""))
+        if out and total > max_chars:
+            break
+        out.append({"role": m["role"], "content": m["content"]})
+    return list(reversed(out))
+
+
+def search_terms(model, question):
+    """Turkce soruyu koddaki Ingilizce adlarla eslestirmek icin modelden anahtar kelime ister."""
     payload = {
         "model": model,
-        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+        "stream": False,
+        "messages": [{"role": "user", "content":
+                      "Asagidaki soru icin bir kod tabaninda aranacak anahtar kelimeleri yaz. "
+                      "Ingilizce karsiliklari, olasi sinif/fonksiyon/degisken/tablo adlarini dahil et. "
+                      "Sadece bosluklarla ayrilmis en fazla 15 kelime yaz, baska hicbir sey yazma.\n\n"
+                      "Soru: " + question[:1500]}],
+        "options": {"temperature": 0, "num_predict": 60},
+    }
+    try:
+        with ollama_request("/api/chat", payload, timeout=60) as r:
+            return json.load(r).get("message", {}).get("content", "")[:400]
+    except Exception:  # noqa: BLE001 - arama terimleri istege bagli
+        return ""
+
+
+def project_context(model, messages):
+    """Acik proje varsa son soruya gore (sistem metni, kullanilan dosyalar) dondurur."""
+    with PROJECT_LOCK:
+        proj = PROJECT
+    if not proj or not messages:
+        return "", []
+    proj.refresh()
+    question = messages[-1]["content"]
+    prev = " ".join(m["content"] for m in messages[-3:-1] if m["role"] == "user")
+    budget = int(NUM_CTX * 3 * 0.55)  # ~3 karakter/token, baglamin ~%55'i proje icin
+    ctx, used, whole = proj.build_context(question, budget, "")
+    if not whole:
+        extra = search_terms(model, question) + " " + prev
+        ctx, used, _ = proj.build_context(question, budget, extra)
+    return PROJECT_PROMPT + ctx, used
+
+
+def chat_stream(model, messages, extra_system=""):
+    """Ollama'dan gelen cevabi parca parca (str) dondurur."""
+    history_budget = int(NUM_CTX * 3 * (0.3 if extra_system else 0.75))
+    payload = {
+        "model": model,
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT + extra_system}]
+        + trim_history(messages, history_budget),
         "stream": True,
-        "options": {"temperature": 0.2, "num_ctx": 8192},
+        "options": {"temperature": 0.2, "num_ctx": NUM_CTX},
     }
     with ollama_request("/api/chat", payload) as r:
         for line in r:
@@ -159,6 +226,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/api/project":
+            with PROJECT_LOCK:
+                proj = PROJECT
+            self._json({"project": proj.info() if proj else None})
+        elif self.path == "/api/project/files":
+            with PROJECT_LOCK:
+                proj = PROJECT
+            self._json({"files": sorted(proj.files) if proj else []})
         elif self.path == "/api/models":
             try:
                 self._json({"models": list_models(), "default": self.model})
@@ -172,12 +247,20 @@ class Handler(BaseHTTPRequestHandler):
         if not self._same_origin():
             return self._json({"error": "izin yok"}, 403)
         data = self._body()
+        if self.path == "/api/project":
+            return self._json(open_project(data.get("path")))
         if self.path == "/api/chat":
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
             self.end_headers()
+            model = data.get("model") or self.model
+            messages = data.get("messages", [])
             try:
-                for piece in chat_stream(data.get("model") or self.model, data.get("messages", [])):
+                extra, used = project_context(model, messages)
+                if used:
+                    self.wfile.write((json.dumps({"files": used}) + "\n").encode())
+                    self.wfile.flush()
+                for piece in chat_stream(model, messages, extra):
                     self.wfile.write((json.dumps({"t": piece}) + "\n").encode())
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
@@ -193,6 +276,28 @@ class Handler(BaseHTTPRequestHandler):
             self._json(run_code(data.get("language"), data.get("code", "")))
         else:
             self._json({"error": "bulunamadi"}, 404)
+
+
+def open_project(path):
+    """path bos/None ise projeyi kapatir."""
+    global PROJECT
+    if not path:
+        with PROJECT_LOCK:
+            PROJECT = None
+        return {"project": None}
+    try:
+        proj = Project(path)
+    except (ValueError, OSError) as e:
+        return {"error": str(e)}
+    with PROJECT_LOCK:
+        PROJECT = proj
+    return {"project": proj.info()}
+
+
+def describe(info):
+    return (f"Proje acildi: {info['name']} - {info['files']} dosya"
+            + (f" - {', '.join(info['stack'])}" if info["stack"] else "")
+            + (" (cok buyuk, bir kismi atlandi)" if info["truncated"] else ""))
 
 
 def serve(model, port):
@@ -211,7 +316,10 @@ def serve(model, port):
 
 def cli(model):
     print(f"Bulut terminal modu (model: {model})")
-    print("Komutlar: /temizle  /dosya <yol>  /cik   | Cok satirli giris icin satiri \\ ile bitirin.\n")
+    print("Komutlar: /proje <klasor>  /projekapat  /temizle  /dosya <yol>  /cik")
+    print("Cok satirli giris icin satiri \\ ile bitirin. Projede dosya secmek icin: @yol/dosya.php\n")
+    if PROJECT:
+        print(describe(PROJECT.info()) + "\n")
     history = []
     while True:
         try:
@@ -227,6 +335,14 @@ def cli(model):
             continue
         if text in ("/cik", "/exit", "/quit"):
             break
+        if text.startswith("/proje "):
+            r = open_project(text[7:].strip().strip('"'))
+            print((r.get("error") or describe(r["project"])) + "\n")
+            continue
+        if text == "/projekapat":
+            open_project(None)
+            print("Proje kapatildi.\n")
+            continue
         if text == "/temizle":
             history.clear()
             print("Sohbet temizlendi.\n")
@@ -242,10 +358,14 @@ def cli(model):
             text = f"Dosya: {path.name}\n```\n{content}\n```\n\n{soru}"
 
         history.append({"role": "user", "content": text})
-        print("Bulut> ", end="", flush=True)
         answer = ""
         try:
-            for piece in chat_stream(model, history):
+            extra, used = project_context(model, history)
+            if used:
+                shown = ", ".join(used[:8]) + (f" (+{len(used) - 8})" if len(used) > 8 else "")
+                print(f"  [incelenen dosyalar: {shown}]")
+            print("Bulut> ", end="", flush=True)
+            for piece in chat_stream(model, history, extra):
                 answer += piece
                 print(piece, end="", flush=True)
         except urllib.error.HTTPError as e:
@@ -263,11 +383,18 @@ def cli(model):
 
 
 def main():
+    global NUM_CTX
     ap = argparse.ArgumentParser(description="Bulut - yerel PHP/Java/Python kod asistani")
     ap.add_argument("mode", nargs="?", default="web", choices=["web", "cli"])
     ap.add_argument("--model", default=DEFAULT_MODEL, help=f"Ollama modeli (varsayilan: {DEFAULT_MODEL})")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--proje", help="Acilista yuklenecek proje klasoru")
+    ap.add_argument("--ctx", type=int, default=NUM_CTX, help=f"Baglam penceresi, token (varsayilan: {NUM_CTX})")
     args = ap.parse_args()
+    NUM_CTX = args.ctx
+    if args.proje:
+        r = open_project(args.proje)
+        print(r.get("error") or describe(r["project"]))
     if args.mode == "cli":
         cli(args.model)
     else:

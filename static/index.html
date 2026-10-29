@@ -57,20 +57,46 @@
   textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   #send { background: var(--accent); color: #fff; border: none; padding: 10px 18px; }
   #file { display: none; }
+  #projBtn.on { border-color: var(--accent); color: var(--accent); }
+  #projPanel { display: none; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  #projPanel.open { display: block; }
+  #projPanel .row { max-width: 860px; margin: 0 auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  #projPath { flex: 1; min-width: 220px; padding: 7px 10px; font: inherit; color: var(--text);
+              background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+  #projInfo { max-width: 860px; margin: 8px auto 0; font-size: 13px; color: var(--muted); }
+  .files { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .files code { font-size: 11.5px; }
+  form { position: relative; }
+  #mention { position: absolute; bottom: 100%; left: 48px; right: 90px; margin-bottom: 6px; display: none;
+             background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+             box-shadow: 0 4px 16px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; }
+  #mention div { padding: 6px 10px; font: 13px ui-monospace, Consolas, monospace; cursor: pointer; }
+  #mention div.sel, #mention div:hover { background: var(--user); }
 </style>
 </head>
 <body>
 <header>
   <h1>☁️ Bulut</h1>
+  <button id="projBtn" type="button" title="Proje klasörü aç">📁 Proje</button>
   <select id="model" title="Model"></select>
   <button id="new" type="button">Yeni sohbet</button>
   <div id="status"></div>
 </header>
 
+<div id="projPanel">
+  <div class="row">
+    <input id="projPath" placeholder="Proje klasörünün tam yolu, örn. C:\xampp\htdocs\sitem veya /home/ben/projem">
+    <button id="projOpen" type="button">Aç</button>
+    <button id="projClose" type="button">Kapat</button>
+  </div>
+  <div id="projInfo">Bir klasör açınca Bulut her soruda ilgili dosyaları bulup okur. Belirli bir dosyayı eklemek için mesajda <code>@</code> yaz.</div>
+</div>
+
 <main id="chat"><div class="wrap" id="log"></div></main>
 
 <footer>
   <form id="form">
+    <div id="mention"></div>
     <button type="button" onclick="document.getElementById('file').click()" title="Dosya ekle">📎</button>
     <input type="file" id="file" multiple>
     <textarea id="input" rows="1" placeholder="PHP, Java veya Python hakkında sor… (Enter gönder, Shift+Enter yeni satır)"></textarea>
@@ -85,6 +111,7 @@ const RUNNABLE = { python: "python", py: "python", php: "php", java: "java" };
 let messages = [];
 let busy = false;
 let attached = [];
+let project = null, projectFiles = [];
 
 try { messages = JSON.parse(localStorage.getItem("bulut_messages") || "[]"); } catch (e) {}
 const save = () => { try { localStorage.setItem("bulut_messages", JSON.stringify(messages)); } catch (e) {} };
@@ -127,10 +154,16 @@ function render(md) {
   return html;
 }
 
-function addMsg(role, text) {
+function filesHtml(files) {
+  if (!files || !files.length) return "";
+  const shown = files.slice(0, 12).map((f) => `<code>${esc(f)}</code>`).join(" ");
+  return `<div class="files">📄 İncelenen dosyalar: ${shown}${files.length > 12 ? ` +${files.length - 12}` : ""}</div>`;
+}
+
+function addMsg(role, text, files) {
   const el = document.createElement("div");
   el.className = "msg " + role;
-  if (role === "user") el.textContent = text; else el.innerHTML = render(text);
+  if (role === "user") el.textContent = text; else el.innerHTML = filesHtml(files) + render(text);
   log.appendChild(el);
   scroll();
   return el;
@@ -145,13 +178,17 @@ function showEmpty() {
       <button data-q="Java'da bir listeyi stream API ile filtreleyip gruplayan örnek yaz.">Java Stream API</button>
       <button data-q="Python'da FastAPI ile basit bir REST API (CRUD) yaz.">Python FastAPI CRUD</button>
       <button data-q="Bu üç dilde (PHP, Java, Python) bir dosyayı satır satır okuyan kodu karşılaştır.">3 dil karşılaştır</button>
-    </div></div>`;
+    </div>${project ? `<p style="margin-top:20px">📁 Açık proje: <b>${esc(project.name)}</b></p><div class="chips">
+      <button data-q="Bu projenin yapısını özetle: ne yapıyor, hangi teknolojiler var, ana klasörler ne işe yarıyor?">Projeyi özetle</button>
+      <button data-q="Bu projedeki olası hataları ve güvenlik açıklarını (SQL injection, XSS, doğrulanmayan girdi vb.) bul.">Hata / güvenlik taraması</button>
+      <button data-q="Bu projenin kod kalitesini değerlendir ve en önemli 5 iyileştirmeyi öner.">İyileştirme önerileri</button>
+    </div>` : ""}</div>`;
 }
 
 function redraw() {
   log.innerHTML = "";
   if (!messages.length) return showEmpty();
-  messages.forEach((m) => addMsg(m.role, m.content));
+  messages.forEach((m) => addMsg(m.role, m.content, m.files));
 }
 
 async function loadModels() {
@@ -181,11 +218,12 @@ async function send(text) {
   input.value = ""; resize();
   busy = true; $("send").textContent = "…";
   const el = addMsg("assistant", "");
-  let answer = "";
+  let answer = "", used = [];
+  if (project) el.innerHTML = '<p class="files">📁 Proje taranıyor…</p>';
   try {
     const res = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: modelSel.value, messages }),
+      body: JSON.stringify({ model: modelSel.value, messages: messages.map(({ role, content }) => ({ role, content })) }),
     });
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";
@@ -198,10 +236,11 @@ async function send(text) {
         if (!line.trim()) continue;
         const j = JSON.parse(line);
         if (j.error) throw new Error(j.error);
-        answer += j.t; el.innerHTML = render(answer); scroll();
+        if (j.files) { used = j.files; el.innerHTML = filesHtml(used); continue; }
+        answer += j.t; el.innerHTML = filesHtml(used) + render(answer); scroll();
       }
     }
-    messages.push({ role: "assistant", content: answer });
+    messages.push({ role: "assistant", content: answer, files: used });
     save();
   } catch (e) {
     messages.pop();
@@ -253,8 +292,99 @@ $("form").addEventListener("submit", (e) => { e.preventDefault(); send(input.val
 $("new").addEventListener("click", () => { messages = []; save(); redraw(); });
 modelSel.addEventListener("change", () => { try { localStorage.setItem("bulut_model", modelSel.value); } catch (e) {} });
 
+// ---------------------------------------------------------------- proje
+function showProject(p) {
+  project = p;
+  $("projBtn").classList.toggle("on", !!p);
+  $("projBtn").textContent = p ? "📁 " + p.name : "📁 Proje";
+  if (p) {
+    $("projPath").value = p.root;
+    $("projInfo").innerHTML = `<b>${esc(p.name)}</b> açık — ${p.files} dosya` +
+      (p.stack.length ? ` · ${esc(p.stack.join(", "))}` : "") +
+      (p.truncated ? " · <span style='color:var(--err)'>çok büyük, bir kısmı atlandı</span>" : "") +
+      `. Mesajda <code>@</code> yazarak dosya seçebilirsin.`;
+    fetch("/api/project/files").then((r) => r.json()).then((r) => (projectFiles = r.files));
+  } else {
+    projectFiles = [];
+    $("projInfo").innerHTML = "Bir klasör açınca Bulut her soruda ilgili dosyaları bulup okur.";
+  }
+  if (!messages.length) showEmpty();
+}
+
+async function openProject(path) {
+  $("projInfo").textContent = path ? "Taranıyor…" : "";
+  const r = await (await fetch("/api/project", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }),
+  })).json();
+  if (r.error) { $("projInfo").innerHTML = `<span style="color:var(--err)">${esc(r.error)}</span>`; return; }
+  showProject(r.project);
+  try { localStorage.setItem("bulut_project", path || ""); } catch (e) {}
+  if (r.project) $("projPanel").classList.remove("open");
+}
+
+$("projBtn").addEventListener("click", () => { $("projPanel").classList.toggle("open"); $("projPath").focus(); });
+$("projOpen").addEventListener("click", () => openProject($("projPath").value.trim()));
+$("projPath").addEventListener("keydown", (e) => { if (e.key === "Enter") openProject($("projPath").value.trim()); });
+$("projClose").addEventListener("click", () => { $("projPath").value = ""; openProject(""); });
+
+async function initProject() {
+  try {
+    const r = await (await fetch("/api/project")).json();
+    if (r.project) return showProject(r.project);
+    const last = localStorage.getItem("bulut_project");
+    if (last) { $("projPath").value = last; openProject(last); }
+  } catch (e) {}
+}
+
+// ---------------------------------------------------------------- @dosya önerisi
+const mention = $("mention");
+let mItems = [], mSel = 0;
+
+function mentionQuery() {
+  const before = input.value.slice(0, input.selectionStart);
+  const m = before.match(/@([\w./\\-]*)$/);
+  return m ? m[1] : null;
+}
+
+function updateMention() {
+  const q = projectFiles.length ? mentionQuery() : null;
+  if (q === null) { mention.style.display = "none"; mItems = []; return; }
+  const ql = q.toLowerCase();
+  mItems = projectFiles.filter((f) => f.toLowerCase().includes(ql))
+    .sort((a, b) => a.split("/").pop().toLowerCase().startsWith(ql) ? -1 : b.split("/").pop().toLowerCase().startsWith(ql) ? 1 : a.length - b.length)
+    .slice(0, 10);
+  mSel = 0;
+  mention.innerHTML = mItems.map((f, i) => `<div data-i="${i}" class="${i === 0 ? "sel" : ""}">${esc(f)}</div>`).join("");
+  mention.style.display = mItems.length ? "block" : "none";
+}
+
+function pickMention(i) {
+  const pos = input.selectionStart, before = input.value.slice(0, pos);
+  const start = before.lastIndexOf("@");
+  input.value = input.value.slice(0, start) + "@" + mItems[i] + " " + input.value.slice(pos);
+  const c = start + mItems[i].length + 2;
+  input.setSelectionRange(c, c);
+  mention.style.display = "none"; mItems = [];
+  input.focus(); resize();
+}
+
+input.addEventListener("input", updateMention);
+input.addEventListener("click", updateMention);
+mention.addEventListener("mousedown", (e) => { e.preventDefault(); if (e.target.dataset.i) pickMention(+e.target.dataset.i); });
+input.addEventListener("keydown", (e) => {
+  if (!mItems.length || mention.style.display === "none") return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    mSel = (mSel + (e.key === "ArrowDown" ? 1 : mItems.length - 1)) % mItems.length;
+    [...mention.children].forEach((d, i) => d.classList.toggle("sel", i === mSel));
+  } else if (e.key === "Enter" || e.key === "Tab") {
+    e.preventDefault(); e.stopImmediatePropagation(); pickMention(mSel);
+  } else if (e.key === "Escape") { mention.style.display = "none"; mItems = []; }
+}, true);
+
 redraw();
 loadModels();
+initProject();
 input.focus();
 </script>
 </body>
