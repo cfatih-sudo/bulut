@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bulut – Kod Asistanı</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --border: #e3e2dc; --accent: #2f6fde; --user: #eef3fd; --code: #f1f0ec; --err: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --panel: #1f1f23; --text: #e8e8e6; --muted: #9a9a95;
+      --border: #303036; --accent: #6b9cff; --user: #24304a; --code: #121215; --err: #ff6b5e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+         display: flex; flex-direction: column; height: 100vh; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 16px;
+           border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; margin-right: auto; }
+  select, button { font: inherit; color: var(--text); background: var(--panel);
+                   border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  #status { font-size: 13px; color: var(--muted); width: 100%; }
+  #status.err { color: var(--err); }
+  main { flex: 1; overflow-y: auto; padding: 16px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  .msg { padding: 12px 14px; border-radius: 12px; margin: 10px 0; background: var(--panel);
+         border: 1px solid var(--border); overflow-wrap: anywhere; }
+  .msg.user { background: var(--user); white-space: pre-wrap; }
+  .msg p { margin: 0.4em 0; }
+  .msg code { background: var(--code); padding: 1px 5px; border-radius: 4px;
+              font: 13px ui-monospace, "Cascadia Code", Consolas, monospace; }
+  .block { margin: 10px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .block .bar { display: flex; gap: 6px; align-items: center; padding: 4px 8px;
+                background: var(--code); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  .block .bar span { margin-right: auto; }
+  .block .bar button { padding: 2px 8px; font-size: 12px; }
+  .block pre { margin: 0; padding: 10px; overflow-x: auto; background: var(--code); }
+  .block pre code { background: none; padding: 0; }
+  .out { margin: 0; padding: 8px 10px; font: 12.5px ui-monospace, Consolas, monospace;
+         white-space: pre-wrap; border-top: 1px dashed var(--border); }
+  .out.bad { color: var(--err); }
+  .empty { color: var(--muted); text-align: center; margin-top: 12vh; }
+  .empty b { color: var(--text); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 16px; }
+  .chips button { font-size: 13px; }
+  footer { border-top: 1px solid var(--border); background: var(--panel); padding: 12px 16px; }
+  form { max-width: 860px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  textarea { flex: 1; resize: none; min-height: 44px; max-height: 240px; padding: 10px 12px;
+             font: inherit; color: var(--text); background: var(--bg);
+             border: 1px solid var(--border); border-radius: 10px; }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  #send { background: var(--accent); color: #fff; border: none; padding: 10px 18px; }
+  #file { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>☁️ Bulut</h1>
+  <select id="model" title="Model"></select>
+  <button id="new" type="button">Yeni sohbet</button>
+  <div id="status"></div>
+</header>
+
+<main id="chat"><div class="wrap" id="log"></div></main>
+
+<footer>
+  <form id="form">
+    <button type="button" onclick="document.getElementById('file').click()" title="Dosya ekle">📎</button>
+    <input type="file" id="file" multiple>
+    <textarea id="input" rows="1" placeholder="PHP, Java veya Python hakkında sor… (Enter gönder, Shift+Enter yeni satır)"></textarea>
+    <button id="send" type="submit">Gönder</button>
+  </form>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $("log"), input = $("input"), modelSel = $("model"), statusEl = $("status");
+const RUNNABLE = { python: "python", py: "python", php: "php", java: "java" };
+let messages = [];
+let busy = false;
+let attached = [];
+
+try { messages = JSON.parse(localStorage.getItem("bulut_messages") || "[]"); } catch (e) {}
+const save = () => { try { localStorage.setItem("bulut_messages", JSON.stringify(messages)); } catch (e) {} };
+
+const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function inline(s) {
+  return esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+}
+
+// Küçük markdown çevirici: kod blokları, başlıklar, listeler, paragraflar.
+function render(md) {
+  const parts = md.split(/```/);
+  let html = "";
+  parts.forEach((part, i) => {
+    if (i % 2 === 1) {
+      const nl = part.indexOf("\n");
+      const lang = (nl === -1 ? "" : part.slice(0, nl)).trim().toLowerCase();
+      const code = nl === -1 ? part : part.slice(nl + 1);
+      const runBtn = RUNNABLE[lang] ? `<button data-act="run" data-lang="${RUNNABLE[lang]}">▶ Çalıştır</button>` : "";
+      html += `<div class="block"><div class="bar"><span>${esc(lang || "kod")}</span>${runBtn}` +
+              `<button data-act="copy">Kopyala</button></div><pre><code>${esc(code.replace(/\n$/, ""))}</code></pre></div>`;
+    } else {
+      part.split(/\n{2,}/).forEach((para) => {
+        if (!para.trim()) return;
+        const lines = para.split("\n");
+        if (lines.every((l) => /^\s*([-*]|\d+\.)\s/.test(l) || !l.trim())) {
+          html += "<ul>" + lines.filter((l) => l.trim())
+            .map((l) => "<li>" + inline(l.replace(/^\s*([-*]|\d+\.)\s/, "")) + "</li>").join("") + "</ul>";
+        } else if (/^#{1,6}\s/.test(para)) {
+          html += "<p><b>" + inline(para.replace(/^#+\s/, "")) + "</b></p>";
+        } else {
+          html += "<p>" + lines.map(inline).join("<br>") + "</p>";
+        }
+      });
+    }
+  });
+  return html;
+}
+
+function addMsg(role, text) {
+  const el = document.createElement("div");
+  el.className = "msg " + role;
+  if (role === "user") el.textContent = text; else el.innerHTML = render(text);
+  log.appendChild(el);
+  scroll();
+  return el;
+}
+
+function scroll() { $("chat").scrollTop = $("chat").scrollHeight; }
+
+function showEmpty() {
+  log.innerHTML = `<div class="empty"><p><b>Merhaba, ben Bulut.</b><br>Bilgisayarında çalışan PHP · Java · Python asistanınım.</p>
+    <div class="chips">
+      <button data-q="PHP'de PDO ile güvenli bir kullanıcı giriş (login) örneği yaz.">PHP PDO login</button>
+      <button data-q="Java'da bir listeyi stream API ile filtreleyip gruplayan örnek yaz.">Java Stream API</button>
+      <button data-q="Python'da FastAPI ile basit bir REST API (CRUD) yaz.">Python FastAPI CRUD</button>
+      <button data-q="Bu üç dilde (PHP, Java, Python) bir dosyayı satır satır okuyan kodu karşılaştır.">3 dil karşılaştır</button>
+    </div></div>`;
+}
+
+function redraw() {
+  log.innerHTML = "";
+  if (!messages.length) return showEmpty();
+  messages.forEach((m) => addMsg(m.role, m.content));
+}
+
+async function loadModels() {
+  try {
+    const r = await (await fetch("/api/models")).json();
+    const list = r.models.length ? r.models : [r.default];
+    modelSel.innerHTML = list.map((m) => `<option>${esc(m)}</option>`).join("");
+    const saved = localStorage.getItem("bulut_model");
+    modelSel.value = list.includes(saved) ? saved : (list.includes(r.default) ? r.default : list[0]);
+    if (r.error) setStatus(r.error, true);
+    else if (!r.models.includes(modelSel.value)) setStatus(`Model yüklü değil. Terminalde çalıştır: ollama pull ${r.default}`, true);
+  } catch (e) { setStatus("Sunucuya bağlanılamadı.", true); }
+}
+
+function setStatus(t, err) { statusEl.textContent = t || ""; statusEl.className = err ? "err" : ""; }
+
+async function send(text) {
+  if (busy || !text.trim()) return;
+  if (!messages.length) log.innerHTML = "";
+  let content = text;
+  if (attached.length) {
+    content = attached.map((f) => `Dosya: ${f.name}\n\`\`\`\n${f.text}\n\`\`\``).join("\n\n") + "\n\n" + text;
+    attached = []; setStatus("");
+  }
+  messages.push({ role: "user", content });
+  addMsg("user", content);
+  input.value = ""; resize();
+  busy = true; $("send").textContent = "…";
+  const el = addMsg("assistant", "");
+  let answer = "";
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: modelSel.value, messages }),
+    });
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n"); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const j = JSON.parse(line);
+        if (j.error) throw new Error(j.error);
+        answer += j.t; el.innerHTML = render(answer); scroll();
+      }
+    }
+    messages.push({ role: "assistant", content: answer });
+    save();
+  } catch (e) {
+    messages.pop();
+    el.innerHTML = `<p style="color:var(--err)">Hata: ${esc(e.message)}</p>`;
+  } finally {
+    busy = false; $("send").textContent = "Gönder"; input.focus();
+  }
+}
+
+log.addEventListener("click", async (e) => {
+  const q = e.target.dataset.q;
+  if (q) return send(q);
+  const act = e.target.dataset.act;
+  if (!act) return;
+  const block = e.target.closest(".block");
+  const code = block.querySelector("pre").innerText;
+  if (act === "copy") {
+    await navigator.clipboard.writeText(code);
+    e.target.textContent = "Kopyalandı ✓"; setTimeout(() => (e.target.textContent = "Kopyala"), 1500);
+  } else if (act === "run") {
+    let out = block.querySelector(".out");
+    if (!out) { out = document.createElement("pre"); out.className = "out"; block.appendChild(out); }
+    out.className = "out"; out.textContent = "Çalışıyor…";
+    try {
+      const r = await (await fetch("/api/run", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language: e.target.dataset.lang, code }),
+      })).json();
+      out.textContent = r.output || r.error; if (!r.ok) out.className = "out bad";
+    } catch (err) { out.textContent = "Çalıştırılamadı: " + err.message; out.className = "out bad"; }
+  }
+});
+
+$("file").addEventListener("change", async (e) => {
+  for (const f of e.target.files) {
+    if (f.size > 200000) { setStatus(`${f.name} çok büyük (200 KB sınırı).`, true); continue; }
+    attached.push({ name: f.name, text: await f.text() });
+  }
+  e.target.value = "";
+  if (attached.length) setStatus("Eklenen dosyalar: " + attached.map((f) => f.name).join(", "));
+});
+
+function resize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 240) + "px"; }
+input.addEventListener("input", resize);
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input.value); }
+});
+$("form").addEventListener("submit", (e) => { e.preventDefault(); send(input.value); });
+$("new").addEventListener("click", () => { messages = []; save(); redraw(); });
+modelSel.addEventListener("change", () => { try { localStorage.setItem("bulut_model", modelSel.value); } catch (e) {} });
+
+redraw();
+loadModels();
+input.focus();
+</script>
+</body>
+</html>
