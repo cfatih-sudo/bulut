@@ -1,0 +1,55 @@
+# =====================================================================
+#  jetbilisim.com.tr — Güvenlik başlıkları (.htaccess)
+#  B-03 (CSP) ve B-05 (HSTS) bulgularını giderir.
+#
+#  KURULUM:
+#   1) Bu bloğu public_html/.htaccess dosyasının EN ÜSTÜNE ekleyin.
+#   2) Önce dosyanın mevcut bir yedeğini alın (cPanel > Dosya Yöneticisi).
+#   3) "Header always set" KULLANILDIĞI için aynı isimli başlık varsa
+#      üzerine yazar; böylece Cloudflare/CMS ile ÇİFT başlık oluşmaz.
+#      Yine de ekledikten sonra şununla doğrulayın:
+#         curl -sSI https://jetbilisim.com.tr/ | sort
+#      Aynı başlık iki kez görünüyorsa, CMS/Cloudflare tarafındaki
+#      kopyayı kapatın (tek kaynak kalsın).
+#
+#  NOT — CSP: İlk aşamada SADECE "Report-Only" satırını açık bırakın.
+#  Site birkaç gün sorunsuz çalışır ve konsol/rapor temizse, o satırı
+#  silip bir alttaki ZORUNLU CSP satırını yorumdan çıkarın.
+# =====================================================================
+
+<IfModule mod_headers.c>
+
+    # --- HSTS (B-05): alt alanlar dahil, 2 yıl ---
+    # Tüm alt alan adları (demo, merkez, cpanel, webmail...) HTTPS'te
+    # sorunsuz çalışıyorsa includeSubDomains güvenlidir. preload'ı ancak
+    # https://hstspreload.org adımlarını yaptıktan sonra bırakın (geri dönüşü zor).
+    Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+
+    # --- Diğer sağlamlaştırma başlıkları (mevcut olanları netleştirir) ---
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+    Header always set Cross-Origin-Opener-Policy "same-origin-allow-popups"
+    Header always set X-Permitted-Cross-Domain-Policies "none"
+
+    # === CSP AŞAMA 1: ÖNCE BUNU AÇIK BIRAKIN (sadece raporlar, hiçbir şeyi engellemez) ===
+    # Aşağıdaki üçüncü-taraf alan adlarını kendi kullandıklarınıza göre düzenleyin
+    # (Google Analytics, Tag Manager, reklam pikselleri, yazı tipi CDN'leri vb.).
+    Header always set Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://www.google-analytics.com; frame-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; upgrade-insecure-requests"
+
+    # === CSP AŞAMA 2: Raporlar temizlenince AŞAMA 1'i silip BUNU açın ===
+    # (Başındaki # işaretini kaldırın. İçeriği Aşama 1 ile birebir aynı tutun.)
+    # Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://www.google-analytics.com; frame-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'; upgrade-insecure-requests"
+
+</IfModule>
+
+# =====================================================================
+#  Hassas dosyalara erişimi kapat (mevcut 403'leri pekiştirir, B-genel)
+# =====================================================================
+<FilesMatch "(^\.|\.(env|ini|log|sql|sqlite|bak|old|zip|tar|gz|git)$|wp-config\.php|config\.php)">
+    Require all denied
+</FilesMatch>
+
+# .git ve yedek dizinlerini tamamen gizle
+RedirectMatch 404 /\.git(/|$)
