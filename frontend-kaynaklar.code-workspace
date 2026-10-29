@@ -1,0 +1,16 @@
+{
+  "folders": [
+    { "name": "bulut", "path": "." },
+    { "name": "📚 Araçlar ve Kütüphaneler", "path": "vendor/araclar" },
+    { "name": "🧮 Algoritma ve Veri Yapıları", "path": "vendor/algoritma" },
+    { "name": "📐 Stil Rehberleri", "path": "vendor/stil" }
+  ],
+  "settings": {
+    "files.watcherExclude": { "**/vendor/**": true },
+    "search.exclude": { "**/node_modules": true },
+    "git.autoRepositoryDetection": "openEditors"
+  },
+  "extensions": {
+    "recommendations": ["anthropic.claude-code", "esbenp.prettier-vscode", "dbaeumer.vscode-eslint"]
+  }
+}

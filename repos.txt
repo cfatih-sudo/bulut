@@ -1,0 +1,34 @@
+# Frontend kaynak depoları
+# Kaynak: "Frontend Geliştiricileri için En Yararlı 57 Github Reposu" (blog.codimis.com)
+# Biçim: <asıl-depo> <fork-adı> <kategori> <açıklama>
+# fork-adı: hesabınızda (cfatih-sudo/...) oluşacak adı. Aynı ada sahip depolar çakışmasın diye bazıları farklı.
+# Yeni depo eklemek için bu dosyaya satır ekleyin, sonra fork ve clone betiklerini tekrar çalıştırın.
+
+# --- Araçlar ve Kütüphaneler ---
+rough-stuff/rough                      rough                          araclar     Elle çizilmiş görünümlü SVG/Canvas grafikler (Rough.js)
+auchenberg/vscode-browser-preview      vscode-browser-preview         araclar     VS Code içinde headless Chrome önizleme (arşivlenmiş)
+hoppscotch/hoppscotch                  hoppscotch                     araclar     API isteği oluşturma/test aracı
+public-apis/public-apis                public-apis                    araclar     Ücretsiz web API listesi
+nwjs/nw.js                             nw.js                          araclar     Chromium + Node.js ile masaüstü uygulama
+storybookjs/storybook                  storybook                      araclar     UI bileşen geliştirme ortamı
+realworld-apps/realworld               realworld                      araclar     Birçok teknolojide örnek Medium klonu
+facebook/create-react-app              create-react-app               araclar     Tek komutla React uygulaması (artık önerilmiyor)
+prettier/prettier                      prettier                       araclar     Kod biçimlendirici
+faker-js/faker                         faker                          araclar     Sahte/test verisi üretici (Faker.js'in güncel hali)
+rikschennink/fitty                     fitty                          araclar     Yazıyı kutusuna sığacak şekilde boyutlandırma
+ai/size-limit                          size-limit                     araclar     JS paket boyutu/maliyet limiti kontrolü
+date-fns/date-fns                      date-fns                       araclar     Tarih işlemleri kütüphanesi
+
+# --- Algoritma ve Veri Yapıları ---
+trekhleb/javascript-algorithms                         javascript-algorithms                       algoritma   Açıklamalı algoritma ve veri yapıları
+loiane/javascript-datastructures-algorithms            javascript-datastructures-algorithms        algoritma   JS/TS veri yapıları (kitap kaynak kodu)
+knaxus/problem-solving-javascript                      problem-solving-javascript                  algoritma   Testli JS mülakat soruları
+benoitvallon/computer-science-in-javascript            computer-science-in-javascript              algoritma   JS ile bilgisayar bilimi temelleri
+TheAlgorithms/JavaScript                               TheAlgorithms-JavaScript                    algoritma   JS algoritma havuzu
+amejiarosario/dsa.js-data-structures-algorithms-javascript  dsa.js                             algoritma   Veri yapıları başvuru kılavuzu (mülakat hazırlığı)
+
+# --- Stil Rehberleri ---
+airbnb/javascript                      airbnb-javascript              stil        Airbnb JS + React + CSS-in-JS + CSS/Sass rehberleri
+google/styleguide                      google-styleguide              stil        Google JS, TypeScript, HTML/CSS rehberleri
+standard/standard                      standard                       stil        JavaScript Standard Style
+felixge/node-style-guide               node-style-guide               stil        Node.js stil rehberi
