@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from proje import Project
+from uygula import Applier, parse_blocks
 
 ROOT = Path(__file__).resolve().parent
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -34,6 +35,7 @@ RUN_TIMEOUT = 20  # saniye
 NUM_CTX = int(os.environ.get("BULUT_CTX", "16384"))  # modelin baglam penceresi (token)
 
 PROJECT = None
+APPLIER = None
 PROJECT_LOCK = threading.Lock()
 
 SYSTEM_PROMPT = """Sen "Bulut" adinda, kullanicinin kendi bilgisayarinda calisan uzman bir yazilim asistanisin.
@@ -57,6 +59,25 @@ Kullanici bir proje klasoru acti. Asagida projenin yapisi ve soruyla ilgili dosy
 - Degisiklik onerirken hangi dosyanin neresinin degisecegini acikca yaz.
 - Projedeki mevcut stil, framework ve isimlendirmeye uy.
 - Ihtiyacin olan dosya asagida yoksa tahmin etme; kullanicidan @dosya/yolu ile eklemesini iste.
+
+Dosya degistirme bicimi (kullanici "Uygula" dugmesiyle dosyaya yazar, bu yuzden bicime kesinlikle uy):
+- Kod blogunun dil etiketinden sonra iki nokta ve proje icindeki yolu yaz: ```php:app/Http/Controllers/UserController.php
+- YENI dosya veya tamamini gordugun kucuk dosya: blokta dosyanin TAM ve EKSIKSIZ yeni icerigini ver.
+  Asla "// ... mevcut kod ..." gibi kisaltma yazma; yazarsan o kod silinir.
+- BUYUK dosya veya sadece bir kismini gordugun dosya: sadece degisen kismi su bicimde ver
+  (ARA kismi dosyadaki mevcut kodla birebir ayni olmali, birkac satir cevre kod ekle):
+```java:src/main/java/com/ornek/UserService.java
+<<<<<<< ARA
+    public User find(int id) {
+        return repo.get(id);
+    }
+=======
+    public User find(int id) {
+        return repo.findById(id).orElseThrow();
+    }
+>>>>>>> DEGISTIR
+```
+- Ornek/aciklama amacli, dosyaya yazilmayacak kodlarda yol yazma.
 
 """
 
@@ -249,6 +270,19 @@ class Handler(BaseHTTPRequestHandler):
         data = self._body()
         if self.path == "/api/project":
             return self._json(open_project(data.get("path")))
+        if self.path in ("/api/project/preview", "/api/project/apply", "/api/project/undo"):
+            with PROJECT_LOCK:
+                applier = APPLIER
+            if not applier:
+                return self._json({"ok": False, "error": "Once bir proje klasoru acin."})
+            try:
+                if self.path.endswith("undo"):
+                    return self._json(applier.undo())
+                fn = applier.preview if self.path.endswith("preview") else applier.apply
+                r = fn(data.get("path", ""), data.get("content", ""))
+                return self._json({"ok": True, **r})
+            except (ValueError, OSError) as e:
+                return self._json({"ok": False, "error": str(e)})
         if self.path == "/api/chat":
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
@@ -280,10 +314,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def open_project(path):
     """path bos/None ise projeyi kapatir."""
-    global PROJECT
+    global PROJECT, APPLIER
     if not path:
         with PROJECT_LOCK:
-            PROJECT = None
+            PROJECT = APPLIER = None
         return {"project": None}
     try:
         proj = Project(path)
@@ -291,6 +325,7 @@ def open_project(path):
         return {"error": str(e)}
     with PROJECT_LOCK:
         PROJECT = proj
+        APPLIER = Applier(proj)
     return {"project": proj.info()}
 
 
@@ -316,7 +351,7 @@ def serve(model, port):
 
 def cli(model):
     print(f"Bulut terminal modu (model: {model})")
-    print("Komutlar: /proje <klasor>  /projekapat  /temizle  /dosya <yol>  /cik")
+    print("Komutlar: /proje <klasor>  /projekapat  /geri  /temizle  /dosya <yol>  /cik")
     print("Cok satirli giris icin satiri \\ ile bitirin. Projede dosya secmek icin: @yol/dosya.php\n")
     if PROJECT:
         print(describe(PROJECT.info()) + "\n")
@@ -342,6 +377,13 @@ def cli(model):
         if text == "/projekapat":
             open_project(None)
             print("Proje kapatildi.\n")
+            continue
+        if text == "/geri":
+            if not APPLIER:
+                print("Acik proje yok.\n")
+            else:
+                r = APPLIER.undo()
+                print((r.get("message") or r.get("error")) + "\n")
             continue
         if text == "/temizle":
             history.clear()
@@ -380,6 +422,49 @@ def cli(model):
             print("\n[durduruldu]")
         print("\n")
         history.append({"role": "assistant", "content": answer})
+        if APPLIER:
+            cli_apply(answer)
+
+
+def color_diff(diff):
+    if not sys.stdout.isatty():
+        return diff
+    out = []
+    for line in diff.splitlines():
+        if line.startswith("+") and not line.startswith("+++"):
+            line = f"\033[32m{line}\033[0m"
+        elif line.startswith("-") and not line.startswith("---"):
+            line = f"\033[31m{line}\033[0m"
+        elif line.startswith("@@"):
+            line = f"\033[36m{line}\033[0m"
+        out.append(line)
+    return "\n".join(out)
+
+
+def cli_apply(answer):
+    """Cevaptaki dosya bloklarini farkiyla gosterip onay ister."""
+    for path, content in parse_blocks(answer):
+        try:
+            r = APPLIER.preview(path, content)
+        except (ValueError, OSError) as e:
+            print(f"[{path}] uygulanamaz: {e}\n")
+            continue
+        if not r["changed"]:
+            continue
+        print(f"--- Onerilen degisiklik: {r['path']}" + (" (YENI DOSYA)" if r["new_file"] else ""))
+        print(color_diff(r["diff"]))
+        for w in r["warnings"]:
+            print(f"!! UYARI: {w}")
+        try:
+            ok = input(f"{r['path']} dosyasina yazilsin mi? (e/h) ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if ok in ("e", "evet", "y", "yes"):
+            res = APPLIER.apply(path, content)
+            print(f"Yazildi: {res['path']}  (geri almak icin /geri)\n")
+        else:
+            print("Atlandi.\n")
 
 
 def main():

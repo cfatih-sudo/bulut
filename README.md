@@ -7,6 +7,7 @@ Bulut, **tamamen kendi bilgisayarında çalışan**, Claude benzeri bir kod asis
 - 🧠 PHP (Laravel, Symfony, PDO), Java (Spring Boot, Maven) ve Python (Django, FastAPI, pandas) için ayarlanmış talimatlar
 - ▶️ Cevaptaki PHP / Java / Python kodunu tek tıkla **kendi bilgisayarında çalıştırma**
 - 📁 **Proje klasörünü açıp tüm projeyi anlama**: "giriş neden çalışmıyor?" diye sor, ilgili dosyaları kendisi bulur
+- 💾 **Önerilen değişiklikleri onayınla dosyalara yazma** (önce farkı gösterir, tek tıkla geri alınır)
 - 📎 Tek tek dosya ekleyip inceletme / hata ayıklatma
 - Ek Python paketi gerekmez (sadece standart kütüphane)
 
@@ -58,6 +59,25 @@ Bulut nasıl okuyor:
 - Dosyaları sen değiştirdikçe indeks her soruda otomatik güncellenir.
 
 İpucu: Büyük projelerde soruda sınıf, fonksiyon veya dosya adı geçirirsen (`UserService`, `routes/web.php`) çok daha isabetli cevap alırsın.
+
+## Değişiklikleri dosyalara uygulama
+
+Proje açıkken Bulut bir dosyada değişiklik önerdiğinde kod bloğunun üstünde dosya yolu ve **💾 Uygula** düğmesi çıkar.
+
+1. **💾 Uygula**'ya bas → hangi satırların silinip ekleneceğini gösteren (kırmızı/yeşil) bir pencere açılır.
+2. **Onayla ve dosyaya yaz** dersen dosya güncellenir (yoksa oluşturulur). Onaylamadan hiçbir şey yazılmaz.
+3. Beğenmezsen üstteki **↶ Geri al** ile son değişiklikten başlayarak geri alırsın.
+
+- Büyük dosyalarda model sadece değişen kısmı (`ARA / DEĞİŞTİR` bloğu) gönderir; Bulut bunu dosyada bulup yerine koyar. Bulamazsa yazmaz ve uyarır.
+- Model kodu `// ... mevcut kod ...` gibi kısaltmışsa veya yeni içerik eskisinden çok kısaysa pencerede **⚠️ uyarı** çıkar — kod silinmesin diye dikkatle bak.
+- Dosya yolu olmayan bloklarda **💾 Dosyaya yaz…** ile yolu kendin seçebilirsin.
+- Proje dışına, `.git`, `vendor`, `node_modules` içine ve `.env` gibi gizli dosyalara **asla yazılmaz**.
+- Her değişiklikten önce dosyanın eski hali `~/.bulut/yedekler/` klasörüne kopyalanır (projenin içine çöp dosya bırakmaz).
+- Windows satır sonları (CRLF) korunur.
+
+Terminal modunda cevaptaki değişiklikler renkli farkla gösterilir ve her dosya için `(e/h)` diye sorulur. Geri almak için `/geri`.
+
+> Yine de projen git ile takip ediliyorsa, büyük değişikliklerden önce commit atmanı öneririm.
 
 ## Hangi modeli seçmeliyim?
 

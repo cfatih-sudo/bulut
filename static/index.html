@@ -72,6 +72,29 @@
              box-shadow: 0 4px 16px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; }
   #mention div { padding: 6px 10px; font: 13px ui-monospace, Consolas, monospace; cursor: pointer; }
   #mention div.sel, #mention div:hover { background: var(--user); }
+  .block .bar .path { color: var(--text); font-family: ui-monospace, Consolas, monospace; }
+  .block .bar button.apply { border-color: var(--accent); color: var(--accent); }
+  .block .bar button.done { border-color: #2e9e5b; color: #2e9e5b; }
+  .streaming [data-act=apply], .streaming [data-act=applyas] { display: none; }
+  #undoBtn { display: none; }
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center;
+           justify-content: center; padding: 16px; z-index: 10; }
+  #modal.open { display: flex; }
+  #modal .box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; width: 100%;
+                max-width: 960px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
+  #modal h2 { font-size: 15px; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  #modal .warn { margin: 10px 16px 0; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+                 background: rgba(192,57,43,.1); color: var(--err); }
+  #modal .diff { margin: 10px 16px; overflow: auto; flex: 1; background: var(--code); border-radius: 8px;
+                 font: 12.5px/1.45 ui-monospace, Consolas, monospace; padding: 8px 0; white-space: pre; }
+  #modal .diff div { padding: 0 10px; }
+  #modal .diff .add { background: rgba(46,158,91,.18); }
+  #modal .diff .del { background: rgba(192,57,43,.16); }
+  #modal .diff .hunk { color: var(--accent); }
+  #modal .actions { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--border); }
+  #modal .actions .primary { background: var(--accent); color: #fff; border: none; }
+  #toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); background: var(--text);
+           color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; display: none; z-index: 11; }
 </style>
 </head>
 <body>
@@ -79,6 +102,7 @@
   <h1>☁️ Bulut</h1>
   <button id="projBtn" type="button" title="Proje klasörü aç">📁 Proje</button>
   <select id="model" title="Model"></select>
+  <button id="undoBtn" type="button" title="Son dosya değişikliğini geri al">↶ Geri al</button>
   <button id="new" type="button">Yeni sohbet</button>
   <div id="status"></div>
 </header>
@@ -103,6 +127,17 @@
     <button id="send" type="submit">Gönder</button>
   </form>
 </footer>
+
+<div id="modal"><div class="box">
+  <h2 id="mTitle"></h2>
+  <div id="mWarn"></div>
+  <div class="diff" id="mDiff"></div>
+  <div class="actions">
+    <button type="button" id="mCancel">İptal</button>
+    <button type="button" class="primary" id="mOk">Onayla ve dosyaya yaz</button>
+  </div>
+</div></div>
+<div id="toast"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -131,10 +166,18 @@ function render(md) {
   parts.forEach((part, i) => {
     if (i % 2 === 1) {
       const nl = part.indexOf("\n");
-      const lang = (nl === -1 ? "" : part.slice(0, nl)).trim().toLowerCase();
+      const info = (nl === -1 ? "" : part.slice(0, nl)).trim();
+      const m = info.match(/^([\w+#-]*)[ :](\S+)$/);
+      const lang = (m ? m[1] : info).toLowerCase();
+      const path = m ? m[2].replace(/^\.?\//, "") : "";
       const code = nl === -1 ? part : part.slice(nl + 1);
-      const runBtn = RUNNABLE[lang] ? `<button data-act="run" data-lang="${RUNNABLE[lang]}">▶ Çalıştır</button>` : "";
-      html += `<div class="block"><div class="bar"><span>${esc(lang || "kod")}</span>${runBtn}` +
+      const isEdit = /^<{5,9} ?ARA/m.test(code);
+      const runBtn = RUNNABLE[lang] && !isEdit ? `<button data-act="run" data-lang="${RUNNABLE[lang]}">▶ Çalıştır</button>` : "";
+      const applyBtn = !project ? "" : path
+        ? `<button class="apply" data-act="apply" data-path="${esc(path)}">💾 Uygula</button>`
+        : (lang && lang !== "bash" && lang !== "sh" && lang !== "text" ? `<button data-act="applyas">💾 Dosyaya yaz…</button>` : "");
+      const label = path ? `<span class="path">${esc(path)}</span>` : `<span>${esc(lang || "kod")}</span>`;
+      html += `<div class="block"><div class="bar">${label}${applyBtn}${runBtn}` +
               `<button data-act="copy">Kopyala</button></div><pre><code>${esc(code.replace(/\n$/, ""))}</code></pre></div>`;
     } else {
       part.split(/\n{2,}/).forEach((para) => {
@@ -218,6 +261,7 @@ async function send(text) {
   input.value = ""; resize();
   busy = true; $("send").textContent = "…";
   const el = addMsg("assistant", "");
+  el.classList.add("streaming");
   let answer = "", used = [];
   if (project) el.innerHTML = '<p class="files">📁 Proje taranıyor…</p>';
   try {
@@ -247,6 +291,7 @@ async function send(text) {
     el.innerHTML = `<p style="color:var(--err)">Hata: ${esc(e.message)}</p>`;
   } finally {
     busy = false; $("send").textContent = "Gönder"; input.focus();
+    el.classList.remove("streaming");
   }
 }
 
@@ -257,6 +302,14 @@ log.addEventListener("click", async (e) => {
   if (!act) return;
   const block = e.target.closest(".block");
   const code = block.querySelector("pre").innerText;
+  if (act === "apply" || act === "applyas") {
+    let path = e.target.dataset.path;
+    if (act === "applyas") {
+      path = prompt("Proje içinde hangi dosyaya yazılsın? (örn. app/Models/User.php)");
+      if (!path) return;
+    }
+    return previewApply(path, code, e.target);
+  }
   if (act === "copy") {
     await navigator.clipboard.writeText(code);
     e.target.textContent = "Kopyalandı ✓"; setTimeout(() => (e.target.textContent = "Kopyala"), 1500);
@@ -308,7 +361,8 @@ function showProject(p) {
     projectFiles = [];
     $("projInfo").innerHTML = "Bir klasör açınca Bulut her soruda ilgili dosyaları bulup okur.";
   }
-  if (!messages.length) showEmpty();
+  setUndo(0);
+  redraw();
 }
 
 async function openProject(path) {
@@ -335,6 +389,58 @@ async function initProject() {
     if (last) { $("projPath").value = last; openProject(last); }
   } catch (e) {}
 }
+
+// ---------------------------------------------------------------- dosyaya uygulama
+let pending = null;
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.h); toast.h = setTimeout(() => (t.style.display = "none"), 3500);
+}
+
+async function post(url, body) {
+  return (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                             body: JSON.stringify(body || {}) })).json();
+}
+
+async function previewApply(path, content, btn) {
+  const r = await post("/api/project/preview", { path, content });
+  if (!r.ok) return alert("Uygulanamıyor:\n" + r.error);
+  if (!r.changed) return toast(`${r.path} zaten aynı, değişiklik yok.`);
+  pending = { path, content, btn };
+  $("mTitle").textContent = (r.new_file ? "Yeni dosya oluşturulacak: " : "Değişiklik: ") + r.path;
+  $("mWarn").innerHTML = r.warnings.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join("");
+  $("mDiff").innerHTML = r.diff.split("\n").map((l) => {
+    const c = l.startsWith("+++") || l.startsWith("---") ? "" : l[0] === "+" ? "add" : l[0] === "-" ? "del" : l.startsWith("@@") ? "hunk" : "";
+    return `<div class="${c}">${esc(l) || " "}</div>`;
+  }).join("");
+  $("modal").classList.add("open");
+  $("mOk").focus();
+}
+
+function closeModal() { $("modal").classList.remove("open"); pending = null; }
+$("mCancel").addEventListener("click", closeModal);
+$("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && pending) closeModal(); });
+
+$("mOk").addEventListener("click", async () => {
+  if (!pending) return;
+  const { path, content, btn } = pending;
+  const r = await post("/api/project/apply", { path, content });
+  closeModal();
+  if (!r.ok) return alert("Yazılamadı:\n" + r.error);
+  btn.textContent = "✓ Uygulandı"; btn.classList.add("done");
+  setUndo(r.undo_count);
+  toast(`${r.path} ${r.new_file ? "oluşturuldu" : "güncellendi"}.`);
+  fetch("/api/project/files").then((x) => x.json()).then((x) => (projectFiles = x.files));
+});
+
+function setUndo(n) { $("undoBtn").style.display = n ? "inline-block" : "none"; }
+$("undoBtn").addEventListener("click", async () => {
+  const r = await post("/api/project/undo");
+  toast(r.message || r.error);
+  setUndo(r.undo_count);
+});
 
 // ---------------------------------------------------------------- @dosya önerisi
 const mention = $("mention");
