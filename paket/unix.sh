@@ -61,37 +61,43 @@ yesil "Tamam ($PY)"
 mavi "3/5  Ollama (yapay zeka motoru) kontrol ediliyor"
 ollama_yolu() {
   command -v ollama 2>/dev/null && return
-  for p in "/Applications/Ollama.app/Contents/Resources/ollama" "$HOME/Applications/Ollama.app/Contents/Resources/ollama"; do
+  for p in "/Applications/Ollama.app/Contents/Resources/ollama" "$HOME/Applications/Ollama.app/Contents/Resources/ollama" \
+           /usr/local/bin/ollama /opt/homebrew/bin/ollama /snap/bin/ollama "$HOME/.local/bin/ollama"; do
     [ -x "$p" ] && { echo "$p"; return; }
   done
   return 0
 }
-hazir() { curl -fsS -m 3 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; }
+OLLAMA_URL="$(cd "$UYGULAMA" && "$PY" -B -c 'import bulut; print(bulut.OLLAMA_URL)')"
+hazir() { curl -fsS -m 3 "$OLLAMA_URL/api/tags" >/dev/null 2>&1; }
 
 OLLAMA="$(ollama_yolu)"
-if [ -z "$OLLAMA" ]; then
-  if [ "$OS" = "Darwin" ]; then
-    echo "    Ollama indiriliyor..."
-    TMPZ="$(mktemp -d)"
-    curl -fL --progress-bar -o "$TMPZ/Ollama.zip" https://ollama.com/download/Ollama-darwin.zip
-    HEDEF_APP="/Applications"
-    [ -w "$HEDEF_APP" ] || { HEDEF_APP="$HOME/Applications"; mkdir -p "$HEDEF_APP"; }
-    ditto -x -k "$TMPZ/Ollama.zip" "$HEDEF_APP"
-    rm -rf "$TMPZ"
-    open -a "$HEDEF_APP/Ollama.app" || true
+if hazir; then
+  yesil "Ollama zaten calisiyor ($OLLAMA_URL), indirme yok"
+else
+  if [ -z "$OLLAMA" ]; then
+    echo "    Ollama bulunamadi, indiriliyor..."
+    if [ "$OS" = "Darwin" ]; then
+      TMPZ="$(mktemp -d)"
+      curl -fL --progress-bar -o "$TMPZ/Ollama.zip" https://ollama.com/download/Ollama-darwin.zip
+      HEDEF_APP="/Applications"
+      [ -w "$HEDEF_APP" ] || { HEDEF_APP="$HOME/Applications"; mkdir -p "$HEDEF_APP"; }
+      ditto -x -k "$TMPZ/Ollama.zip" "$HEDEF_APP"
+      rm -rf "$TMPZ"
+      open -a "$HEDEF_APP/Ollama.app" || true
+    else
+      echo "    (resmi kurulum betigi, sifreniz istenebilir)"
+      curl -fsSL https://ollama.com/install.sh | sh
+    fi
+    OLLAMA="$(ollama_yolu)"
+    [ -n "$OLLAMA" ] || hata "Ollama kurulamadi. https://ollama.com/download adresinden elle kurup tekrar deneyin."
   else
-    echo "    Ollama kuruluyor (resmi kurulum betigi, sifreniz istenebilir)..."
-    curl -fsSL https://ollama.com/install.sh | sh
+    echo "    Kurulu Ollama bulundu, baslatiliyor: $OLLAMA"
   fi
-  OLLAMA="$(ollama_yolu)"
-  [ -n "$OLLAMA" ] || hata "Ollama kurulamadi. https://ollama.com/download adresinden elle kurup tekrar deneyin."
-fi
-if ! hazir; then
-  nohup "$OLLAMA" serve >/dev/null 2>&1 &
+  hazir || { nohup "$OLLAMA" serve >/dev/null 2>&1 & }
   for _ in $(seq 1 40); do hazir && break; sleep 0.5; done
-  hazir || hata "Ollama baslatilamadi."
+  hazir || hata "Ollama baslatilamadi. Ollama uygulamasini acip tekrar deneyin."
+  yesil "Tamam"
 fi
-yesil "Tamam ($OLLAMA)"
 
 # ------------------------------------------------------------ 4. model
 if [ "$OS" = "Darwin" ]; then
@@ -99,15 +105,73 @@ if [ "$OS" = "Darwin" ]; then
 else
   RAM_GB=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1048576 ))
 fi
-if [ "$RAM_GB" -lt 12 ]; then MODEL="qwen2.5-coder:3b"; CTX=8192; BOYUT="1.9 GB"
-elif [ "$RAM_GB" -lt 28 ]; then MODEL="qwen2.5-coder:7b"; CTX=16384; BOYUT="4.7 GB"
-else MODEL="qwen2.5-coder:14b"; CTX=16384; BOYUT="9 GB"; fi
-mavi "4/5  Yapay zeka modeli: $MODEL  (bilgisayarinda $RAM_GB GB RAM var)"
-if "$OLLAMA" list 2>/dev/null | grep -q "$MODEL"; then
-  yesil "Model zaten yuklu"
-else
-  echo "    Indiriliyor (~$BOYUT). Internet hizina gore 5-30 dakika surebilir..."
-  "$OLLAMA" pull "$MODEL" || hata "Model indirilemedi. Internet baglantinizi kontrol edip tekrar deneyin."
+if [ "$RAM_GB" -lt 12 ]; then ONERILEN="qwen2.5-coder:3b"; CTX=8192; BOYUT="1.9 GB"
+elif [ "$RAM_GB" -lt 28 ]; then ONERILEN="qwen2.5-coder:7b"; CTX=16384; BOYUT="4.7 GB"
+else ONERILEN="qwen2.5-coder:14b"; CTX=16384; BOYUT="9 GB"; fi
+mavi "4/5  Yapay zeka modeli kontrol ediliyor (bilgisayarinda $RAM_GB GB RAM var)"
+
+# Kurulu modeller (gomme / embedding modelleri haric)
+MEVCUT=()
+while IFS= read -r m; do [ -n "$m" ] && MEVCUT+=("$m"); done < <(
+  curl -fsS -m 10 "$OLLAMA_URL/api/tags" 2>/dev/null | "$PY" -c '
+import json, sys
+try:
+    for m in json.load(sys.stdin).get("models", []):
+        if "embed" not in m["name"]:
+            print(m["name"])
+except Exception:
+    pass')
+
+MODEL=""
+ESLER=("$ONERILEN")
+[ "$ONERILEN" = "qwen2.5-coder:7b" ] && ESLER+=("qwen2.5-coder:latest" "qwen2.5-coder")
+for m in "${MEVCUT[@]+"${MEVCUT[@]}"}"; do
+  for e in "${ESLER[@]}"; do [ "$m" = "$e" ] && { MODEL="$m"; break 2; }; done
+done
+if [ -z "$MODEL" ]; then
+  for aile in qwen3-coder qwen2.5-coder devstral codestral deepseek-coder yi-coder codegemma codellama starcoder granite-code opencoder; do
+    for m in "${MEVCUT[@]+"${MEVCUT[@]}"}"; do
+      case "$m" in "$aile"*) MODEL="$m"; break 2;; esac
+    done
+  done
+fi
+
+if [ -n "$MODEL" ]; then
+  yesil "Bilgisayardaki $MODEL modeli kullanilacak, indirme yok"
+elif [ "${#MEVCUT[@]}" -gt 0 ]; then
+  echo "    Bilgisayarindaki modeller:"
+  i=1; for m in "${MEVCUT[@]}"; do echo "      [$i] $m"; i=$((i + 1)); done
+  echo "      [i] Kod icin onerilen modeli indir: $ONERILEN (~$BOYUT)"
+  SEC=""
+  read -r -p "    Secimin (Enter = ${MEVCUT[0]}): " SEC < /dev/tty || true
+  if [ "$SEC" = "i" ] || [ "$SEC" = "I" ]; then
+    MODEL=""
+  elif [[ "$SEC" =~ ^[0-9]+$ ]] && [ "$SEC" -ge 1 ] && [ "$SEC" -le "${#MEVCUT[@]}" ]; then
+    MODEL="${MEVCUT[$((SEC - 1))]}"
+  else
+    MODEL="${MEVCUT[0]}"
+  fi
+fi
+
+if [ -z "$MODEL" ]; then
+  MODEL="$ONERILEN"
+  echo "    $MODEL indiriliyor (~$BOYUT). Internet hizina gore 5-30 dakika surebilir..."
+  if [ -n "$OLLAMA" ]; then
+    "$OLLAMA" pull "$MODEL" || hata "Model indirilemedi. Internet baglantinizi kontrol edip tekrar deneyin."
+  else
+    # ollama komutu yok ama sunucu calisiyor: API uzerinden indir
+    curl -fsSN -X POST "$OLLAMA_URL/api/pull" -d "{\"model\":\"$MODEL\"}" | "$PY" -c '
+import json, sys
+for line in sys.stdin:
+    j = json.loads(line)
+    if "error" in j:
+        print("\n    " + j["error"]); sys.exit(1)
+    msg = "    " + j.get("status", "")
+    if j.get("total") and j.get("completed"):
+        msg += " %%%d" % (100 * j["completed"] // j["total"])
+    print("\r" + msg.ljust(70), end="", flush=True)
+print()' || hata "Model indirilemedi."
+  fi
   yesil "Tamam"
 fi
 

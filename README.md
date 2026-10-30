@@ -21,17 +21,17 @@ Bulut, **tamamen kendi bilgisayarında çalışan**, Claude benzeri bir kod asis
 | **macOS** | [`Bulut-Kurulum-Mac.command`](kurulum/Bulut-Kurulum-Mac.command) | Terminal'de: `bash ~/Downloads/Bulut-Kurulum-Mac.command` |
 | **Linux** | [`Bulut-Kurulum-Linux.sh`](kurulum/Bulut-Kurulum-Linux.sh) | Terminal'de: `bash ~/İndirilenler/Bulut-Kurulum-Linux.sh` |
 
-Kurulum dosyası her şeyi kendisi yapar:
+Kurulum dosyası her şeyi kendisi yapar ve **bilgisayarda zaten olanı tekrar indirmez**:
 1. Bulut'u kurar (Windows: `%LOCALAPPDATA%\Bulut`, macOS: `~/Library/Application Support/Bulut`, Linux: `~/.local/share/bulut`)
-2. Python yoksa hazırlar (Windows'ta sadece Bulut'a özel, sistemine dokunmayan bir Python indirir)
-3. Ollama yoksa indirip kurar
-4. Bilgisayarının RAM'ine göre modeli seçip indirir (12 GB altı → `3b`, 28 GB altı → `7b`, üstü → `14b`)
-5. Masaüstüne ve Başlat menüsüne / Uygulamalar'a **Bulut** simgesi koyar ve Bulut'u açar
+2. **Python:** bilgisayarda Python 3.9+ varsa onu kullanır. Yoksa (sadece Windows'ta) Bulut'a özel, sistemine dokunmayan küçük bir Python indirir.
+3. **Ollama:** çalışıyorsa doğrudan ona bağlanır; kuruluysa (PATH, Program Files, scoop, choco, Homebrew…) başlatır. Sadece hiç yoksa indirir. `OLLAMA_HOST` ayarına uyar.
+4. **Model:** kurulu bir kod modelin varsa (`qwen2.5-coder`, `qwen3-coder`, `deepseek-coder`, `codellama`, `devstral`, `codegemma`…) onu kullanır. Sadece genel modellerin varsa (ör. `llama3`) hangisini kullanacağını ya da kod modeli indirmek isteyip istemediğini sorar. Hiç model yoksa RAM'e göre seçip indirir (12 GB altı → `3b`, 28 GB altı → `7b`, üstü → `14b`).
+5. Masaüstüne ve Başlat menüsüne / Uygulamalar'a **Bulut** simgesi koyar ve Bulut'u açar.
 
 Sonra her seferinde masaüstündeki **Bulut** simgesine tıklaman yeterli; tarayıcıda kendiliğinden açılır.
 Kapatmak için sağ üstteki **⏻** düğmesi.
 
-İnternet hızına göre ilk kurulum 5–30 dakika sürebilir (model ~2–9 GB). Kurulum dosyasını tekrar çalıştırmak Bulut'u günceller; inmiş model tekrar inmez.
+Model indirilmesi gerekirse internet hızına göre 5–30 dakika sürebilir (~2–9 GB). Kurulum dosyasını tekrar çalıştırmak Bulut'u günceller; inmiş model tekrar inmez.
 
 **Windows uyarısı:** İnternetten indirilen dosyalar için "Windows bilgisayarınızı korudu" çıkabilir → **Ek bilgi** → **Yine de çalıştır**.
 

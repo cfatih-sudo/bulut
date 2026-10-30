@@ -31,7 +31,22 @@ from proje import Project
 from uygula import Applier, parse_blocks
 
 ROOT = Path(__file__).resolve().parent
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+def _ollama_url():
+    """OLLAMA_URL, yoksa Ollama'nin kendi OLLAMA_HOST ayari, yoksa varsayilan adres."""
+    if os.environ.get("OLLAMA_URL"):
+        return os.environ["OLLAMA_URL"].rstrip("/")
+    host = os.environ.get("OLLAMA_HOST", "").strip()
+    if not host:
+        return "http://127.0.0.1:11434"
+    if not re.match(r"https?://", host):
+        host = "http://" + host
+    host = host.replace("://0.0.0.0", "://127.0.0.1").rstrip("/")
+    if not re.search(r":\d+$", host):
+        host += ":11434"
+    return host
+
+
+OLLAMA_URL = _ollama_url()
 DEFAULT_MODEL = os.environ.get("BULUT_MODEL", "qwen2.5-coder:7b")
 RUN_TIMEOUT = 20  # saniye
 NUM_CTX = int(os.environ.get("BULUT_CTX", "16384"))  # modelin baglam penceresi (token)
@@ -367,6 +382,11 @@ def find_ollama():
     if found:
         return found
     for p in (Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
+              Path(os.environ.get("ProgramFiles", "")) / "Ollama" / "ollama.exe",
+              Path.home() / "scoop" / "shims" / "ollama.exe",
+              Path(os.environ.get("ProgramData", "")) / "chocolatey" / "bin" / "ollama.exe",
+              Path("/opt/homebrew/bin/ollama"),
+              Path("/snap/bin/ollama"),
               Path("/Applications/Ollama.app/Contents/Resources/ollama"),
               Path.home() / "Applications" / "Ollama.app" / "Contents" / "Resources" / "ollama",
               Path("/usr/local/bin/ollama")):
