@@ -1,0 +1,5 @@
+# Kurulum dosyalari bayt bayt korunmali (Windows .bat CRLF ister, .sh LF ister)
+kurulum/* -text
+*.bat -text
+*.sh text eol=lf
+*.command text eol=lf

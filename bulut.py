@@ -16,12 +16,14 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import urllib.error
 import urllib.request
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -177,13 +179,27 @@ def chat_stream(model, messages, extra_system=""):
 # Kodu yerelde calistirma
 # --------------------------------------------------------------------------- #
 
+def system_python():
+    """Kullanicinin kendi Python'u (paketleri orada kurulu). Yoksa Bulut'un Python'u."""
+    if os.name == "nt" and shutil.which("py"):
+        return ["py", "-3"]
+    for name in ("python3", "python"):
+        p = shutil.which(name)
+        if p and "WindowsApps" not in p:  # Windows Store kisayolu gercek Python degil
+            return [p]
+    exe = sys.executable
+    if exe.lower().endswith("pythonw.exe"):
+        exe = exe[:-11] + "python.exe"
+    return [exe]
+
+
 def run_code(language, code):
     language = (language or "").lower()
     with tempfile.TemporaryDirectory(prefix="bulut_") as tmp:
         tmp = Path(tmp)
         if language in ("python", "py"):
             f = tmp / "main.py"
-            cmd = [sys.executable, str(f)]
+            cmd = system_python() + [str(f)]
         elif language == "php":
             if not shutil.which("php"):
                 return {"ok": False, "output": "PHP bulunamadi. PHP'yi kurup PATH'e ekleyin."}
@@ -205,6 +221,7 @@ def run_code(language, code):
             p = subprocess.run(
                 cmd, cwd=tmp, capture_output=True, text=True,
                 timeout=RUN_TIMEOUT, encoding="utf-8", errors="replace",
+                creationflags=0x08000000 if os.name == "nt" else 0,  # Windows'ta konsol penceresi acma
             )
         except subprocess.TimeoutExpired:
             return {"ok": False, "output": f"Zaman asimi ({RUN_TIMEOUT} sn)."}
@@ -244,6 +261,13 @@ class Handler(BaseHTTPRequestHandler):
             body = (ROOT / "static" / "index.html").read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path in ("/favicon.ico", "/bulut.png"):
+            body = (ROOT / "static" / ("bulut.ico" if self.path.endswith("ico") else "bulut.png")).read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/x-icon" if self.path.endswith("ico") else "image/png")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -306,6 +330,9 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(e, urllib.error.HTTPError) and e.code == 404:
                     msg = "Model bulunamadi. Once: ollama pull " + (data.get("model") or self.model)
                 self.wfile.write((json.dumps({"error": msg}) + "\n").encode())
+        elif self.path == "/api/kapat":
+            self._json({"ok": True})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
         elif self.path == "/api/run":
             self._json(run_code(data.get("language"), data.get("code", "")))
         else:
@@ -335,10 +362,66 @@ def describe(info):
             + (" (cok buyuk, bir kismi atlandi)" if info["truncated"] else ""))
 
 
-def serve(model, port):
+def find_ollama():
+    found = shutil.which("ollama")
+    if found:
+        return found
+    for p in (Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
+              Path("/Applications/Ollama.app/Contents/Resources/ollama"),
+              Path.home() / "Applications" / "Ollama.app" / "Contents" / "Resources" / "ollama",
+              Path("/usr/local/bin/ollama")):
+        if p.is_file():
+            return str(p)
+    return None
+
+
+def ensure_ollama():
+    """Ollama calismiyorsa arka planda baslatir."""
+    try:
+        list_models()
+        return
+    except (urllib.error.URLError, OSError):
+        pass
+    exe = find_ollama()
+    if not exe:
+        print("Ollama bulunamadi. https://ollama.com adresinden kurun.")
+        return
+    flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+    subprocess.Popen([exe, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     stdin=subprocess.DEVNULL, creationflags=flags, start_new_session=os.name != "nt")
+    for _ in range(30):
+        try:
+            list_models()
+            return
+        except (urllib.error.URLError, OSError):
+            threading.Event().wait(0.5)
+
+
+def serve(model, port, open_browser=False):
     Handler.model = model
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"Bulut hazir -> http://127.0.0.1:{port}   (model: {model}, durdurmak icin Ctrl+C)")
+    url = f"http://127.0.0.1:{port}"
+    try:
+        # Windows'ta SO_REUSEADDR dolu portu da kapabildigi icin once elle kontrol et.
+        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+        in_use = True
+    except OSError:
+        in_use = False
+    try:
+        if in_use:
+            raise OSError("port dolu")
+        ThreadingHTTPServer.allow_reuse_address = os.name != "nt"
+        srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError:
+        # Bulut zaten calisiyor olabilir: sadece tarayiciyi ac.
+        if open_browser:
+            webbrowser.open(url)
+            return
+        sys.exit(f"{port} portu kullanimda (Bulut zaten acik olabilir: {url}). "
+                 "Baska port icin: python bulut.py --port 8766")
+    if open_browser:
+        ensure_ollama()
+        threading.Timer(0.5, webbrowser.open, [url]).start()
+    print(f"Bulut hazir -> {url}   (model: {model}, durdurmak icin Ctrl+C)")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -475,6 +558,7 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--proje", help="Acilista yuklenecek proje klasoru")
     ap.add_argument("--ctx", type=int, default=NUM_CTX, help=f"Baglam penceresi, token (varsayilan: {NUM_CTX})")
+    ap.add_argument("--ac", action="store_true", help="Tarayiciyi ac ve gerekirse Ollama'yi baslat")
     args = ap.parse_args()
     NUM_CTX = args.ctx
     if args.proje:
@@ -483,7 +567,7 @@ def main():
     if args.mode == "cli":
         cli(args.model)
     else:
-        serve(args.model, args.port)
+        serve(args.model, args.port, args.ac)
 
 
 if __name__ == "__main__":

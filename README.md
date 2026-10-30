@@ -11,7 +11,34 @@ Bulut, **tamamen kendi bilgisayarında çalışan**, Claude benzeri bir kod asis
 - 📎 Tek tek dosya ekleyip inceletme / hata ayıklatma
 - Ek Python paketi gerekmez (sadece standart kütüphane)
 
-## Kurulum (bir kerelik)
+## ⚡ Tek tıkla kurulum (önerilen)
+
+`kurulum/` klasöründen işletim sistemine uygun dosyayı indir:
+
+| Sistem | Dosya | Nasıl çalıştırılır |
+|---|---|---|
+| **Windows 10/11** | [`Bulut-Kurulum-Windows.bat`](kurulum/Bulut-Kurulum-Windows.bat) | Çift tıkla |
+| **macOS** | [`Bulut-Kurulum-Mac.command`](kurulum/Bulut-Kurulum-Mac.command) | Terminal'de: `bash ~/Downloads/Bulut-Kurulum-Mac.command` |
+| **Linux** | [`Bulut-Kurulum-Linux.sh`](kurulum/Bulut-Kurulum-Linux.sh) | Terminal'de: `bash ~/İndirilenler/Bulut-Kurulum-Linux.sh` |
+
+Kurulum dosyası her şeyi kendisi yapar:
+1. Bulut'u kurar (Windows: `%LOCALAPPDATA%\Bulut`, macOS: `~/Library/Application Support/Bulut`, Linux: `~/.local/share/bulut`)
+2. Python yoksa hazırlar (Windows'ta sadece Bulut'a özel, sistemine dokunmayan bir Python indirir)
+3. Ollama yoksa indirip kurar
+4. Bilgisayarının RAM'ine göre modeli seçip indirir (12 GB altı → `3b`, 28 GB altı → `7b`, üstü → `14b`)
+5. Masaüstüne ve Başlat menüsüne / Uygulamalar'a **Bulut** simgesi koyar ve Bulut'u açar
+
+Sonra her seferinde masaüstündeki **Bulut** simgesine tıklaman yeterli; tarayıcıda kendiliğinden açılır.
+Kapatmak için sağ üstteki **⏻** düğmesi.
+
+İnternet hızına göre ilk kurulum 5–30 dakika sürebilir (model ~2–9 GB). Kurulum dosyasını tekrar çalıştırmak Bulut'u günceller; inmiş model tekrar inmez.
+
+**Windows uyarısı:** İnternetten indirilen dosyalar için "Windows bilgisayarınızı korudu" çıkabilir → **Ek bilgi** → **Yine de çalıştır**.
+
+**Kaldırma:** Windows: `%LOCALAPPDATA%\Bulut\Kaldir.bat` · macOS/Linux: kurulum klasöründeki `kaldir.sh`.
+Ollama ve modeller ayrıca kaldırılır (Windows: Ayarlar → Uygulamalar → Ollama).
+
+## Elle kurulum
 
 1. **Ollama'yı kur:** https://ollama.com/download (Windows / macOS / Linux)
 2. **Kod modelini indir** (~4.7 GB):
@@ -116,3 +143,11 @@ Modelin yazdığı kodu çalıştırmadan önce göz at. Sunucu sadece `127.0.0.
 - **Cevaplar çok yavaş** → Daha küçük model seç (`3b`) veya `--ctx 8192` ile bağlamı küçült.
 - **Proje sorularında yanlış dosyalara bakıyor** → Soruda dosya/sınıf adını geçir ya da `@dosya` ile ekle.
 - **Java "çalıştır" hata veriyor** → JDK 11+ gerekir; kodda `public class Main` ve `main` metodu olmalı.
+
+## Geliştirici notu
+
+Kodu değiştirdikten sonra kurulum dosyalarını yeniden üret:
+```bash
+python paket/olustur.py
+```
+Simgeyi değiştirmek için `paket/ikon.py` düzenlenip çalıştırılır.

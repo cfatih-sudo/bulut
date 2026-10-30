@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bulut – Kod Asistanı</title>
+<link rel="icon" href="/bulut.png">
 <style>
   :root {
     --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
@@ -104,6 +105,7 @@
   <select id="model" title="Model"></select>
   <button id="undoBtn" type="button" title="Son dosya değişikliğini geri al">↶ Geri al</button>
   <button id="new" type="button">Yeni sohbet</button>
+  <button id="quit" type="button" title="Bulut'u kapat">⏻</button>
   <div id="status"></div>
 </header>
 
@@ -487,6 +489,12 @@ input.addEventListener("keydown", (e) => {
     e.preventDefault(); e.stopImmediatePropagation(); pickMention(mSel);
   } else if (e.key === "Escape") { mention.style.display = "none"; mItems = []; }
 }, true);
+
+$("quit").addEventListener("click", async () => {
+  if (!confirm("Bulut kapatılsın mı? (Tekrar açmak için masaüstündeki Bulut simgesine tıkla.)")) return;
+  try { await post("/api/kapat"); } catch (e) {}
+  document.body.innerHTML = '<p style="margin:20vh auto;text-align:center;color:var(--muted)">Bulut kapatıldı. Bu sekmeyi kapatabilirsin.</p>';
+});
 
 redraw();
 loadModels();
