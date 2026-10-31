@@ -147,6 +147,7 @@ class EmailSpider:
         subdomains: bool = False,
         only_domain: bool = False,
         respect_robots: bool = True,
+        dns: bool = True,
         verbose: bool = False,
     ) -> None:
         domain = domain.strip()
@@ -162,6 +163,7 @@ class EmailSpider:
         self.subdomains = subdomains
         self.only_domain = only_domain
         self.respect_robots = respect_robots
+        self.dns = dns
         self.verbose = verbose
 
         self.emails: dict[str, set[str]] = {}
@@ -303,12 +305,42 @@ class EmailSpider:
         paths = ["", "iletisim", "contact", "contact-us", "about", "hakkimizda", "impressum", "kunye"]
         return [self.canonical(urllib.parse.urljoin(base, p)) for p in paths]
 
+    def collect_dns(self) -> list[str]:
+        """DNS/OSINT kaynaklarını tarar; crt.sh'ten bulunan alt alanları (tohum URL) döner."""
+        try:
+            import dns_osint
+        except ImportError:
+            self.log("[dns] dns_osint modülü bulunamadı, atlanıyor")
+            return []
+        print("DNS/OSINT kaynakları taranıyor (TXT, DMARC, security.txt, RDAP, crt.sh)...",
+              file=sys.stderr)
+        try:
+            emails, hosts = dns_osint.collect_all(
+                self.fetch, self.domain, self.timeout, self.subdomains
+            )
+        except Exception as exc:  # ağ/servis hatası taramayı durdurmasın
+            self.log(f"[dns] hata: {exc}")
+            return []
+        with self._lock:
+            for e, labels in emails.items():
+                if self.email_in_scope(e):
+                    if e not in self.emails:
+                        print(f"  + {e}  ({', '.join(sorted(labels))})", file=sys.stderr)
+                    self.emails.setdefault(e, set()).update(labels)
+        if hosts:
+            self.log(f"[dns] crt.sh {len(hosts)} alt alan buldu")
+        return [f"https://{h}/" for h in sorted(hosts)]
+
     def run(self) -> dict[str, set[str]]:
         queue: deque[tuple[str, int]] = deque()
-        for u in self.seed_urls():
-            if u not in self.seen:
-                self.seen.add(u)
-                queue.append((u, 0))
+        seeds = list(self.seed_urls())
+        if self.dns:
+            seeds.extend(self.collect_dns())  # crt.sh alt alanları tohum olarak
+        for u in seeds:
+            cu = self.canonical(u)
+            if cu not in self.seen and self.in_scope(cu):
+                self.seen.add(cu)
+                queue.append((cu, 0))
 
         print(f"Taranıyor: {self.start_url} (en fazla {self.max_pages} sayfa, derinlik {self.max_depth})",
               file=sys.stderr)
@@ -361,6 +393,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--only-domain", action="store_true",
                    help="Sadece hedef alan adına ait e-postaları raporla")
     p.add_argument("--ignore-robots", action="store_true", help="robots.txt kurallarını yok say")
+    p.add_argument("--no-dns", action="store_true",
+                   help="DNS/OSINT kaynaklarını kapat (TXT, DMARC, security.txt, RDAP, crt.sh)")
     p.add_argument("-o", "--output", help="Çıktı dosyası (.csv, .json veya .txt)")
     p.add_argument("-v", "--verbose", action="store_true", help="Ayrıntılı günlük")
     args = p.parse_args(argv)
@@ -375,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
         subdomains=args.subdomains,
         only_domain=args.only_domain,
         respect_robots=not args.ignore_robots,
+        dns=not args.no_dns,
         verbose=args.verbose,
     )
     try:
