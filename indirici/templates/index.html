@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YouTube İndirici</title>
+<style>
+  :root { --bg:#f6f6f4; --kart:#fff; --yazi:#1d1d1b; --soluk:#6b6b66; --vurgu:#d92d20; --cizgi:#e3e3de; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141413; --kart:#1f1f1d; --yazi:#ecece8; --soluk:#9a9a94; --vurgu:#ff5a4a; --cizgi:#33332f; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--yazi); }
+  main { max-width:640px; margin:48px auto; padding:0 16px; }
+  h1 { font-size:1.6rem; margin:0 0 4px; }
+  p.alt { color:var(--soluk); margin:0 0 24px; }
+  .kart { background:var(--kart); border:1px solid var(--cizgi); border-radius:12px; padding:20px; margin-bottom:16px; }
+  input[type=url], select { width:100%; padding:10px 12px; font-size:1rem; border:1px solid var(--cizgi); border-radius:8px; background:var(--bg); color:var(--yazi); }
+  .satir { display:flex; gap:12px; margin-top:12px; flex-wrap:wrap; }
+  .satir > * { flex:1 1 140px; }
+  label.secim { display:flex; align-items:center; gap:8px; margin-top:12px; color:var(--soluk); }
+  button { margin-top:16px; width:100%; padding:12px; font-size:1rem; font-weight:600; border:0; border-radius:8px; background:var(--vurgu); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  .uyari { color:var(--vurgu); font-size:.9rem; }
+  .is { display:flex; flex-direction:column; gap:6px; }
+  .is .baslik { font-weight:600; word-break:break-word; }
+  .cubuk { height:8px; background:var(--cizgi); border-radius:4px; overflow:hidden; }
+  .cubuk > div { height:100%; background:var(--vurgu); width:0; transition:width .3s; }
+  .durum { color:var(--soluk); font-size:.9rem; }
+  .is a { color:var(--vurgu); }
+</style>
+</head>
+<body>
+<main>
+  <h1>YouTube İndirici</h1>
+  <p class="alt">Bağlantıyı yapıştır, biçimi seç, indir.</p>
+
+  <form class="kart" id="form">
+    <input type="url" id="url" placeholder="https://www.youtube.com/watch?v=..." required>
+    <div class="satir">
+      <select id="tur">
+        <option value="video">Video</option>
+        <option value="ses">Sadece ses</option>
+      </select>
+      <select id="kalite">
+        {% for k in kaliteler %}<option value="{{ k }}">{{ "En iyi" if k == "en-iyi" else k ~ "p" }}</option>{% endfor %}
+      </select>
+      <select id="ses_formati" hidden>
+        {% for f in ses_formatlari %}<option value="{{ f }}">{{ f|upper }}</option>{% endfor %}
+      </select>
+    </div>
+    <label class="secim"><input type="checkbox" id="liste"> Oynatma listesinin tamamı</label>
+    <label class="secim"><input type="checkbox" id="altyazi"> Altyazıları da indir</label>
+    {% if not ffmpeg %}<p class="uyari">ffmpeg bulunamadı: ses dönüştürme ve yüksek kaliteli birleştirme kapalı.</p>{% endif %}
+    <button type="submit" id="buton">İndir</button>
+  </form>
+
+  <div id="isler"></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const DURUMLAR = { bekliyor:"Sırada", indiriliyor:"İndiriliyor", isleniyor:"İşleniyor", bitti:"Tamamlandı", hata:"Hata" };
+
+$("tur").addEventListener("change", () => {
+  const ses = $("tur").value === "ses";
+  $("kalite").hidden = ses;
+  $("ses_formati").hidden = !ses;
+});
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("buton").disabled = true;
+  try {
+    const r = await fetch("/api/indir", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: $("url").value,
+        sadece_ses: $("tur").value === "ses",
+        kalite: $("kalite").value,
+        ses_formati: $("ses_formati").value,
+        oynatma_listesi: $("liste").checked,
+        altyazi: $("altyazi").checked,
+      }),
+    });
+    const v = await r.json();
+    if (!r.ok) throw new Error(v.hata || "İstek başarısız");
+    isKartiEkle(v.id, $("url").value);
+    $("url").value = "";
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    $("buton").disabled = false;
+  }
+});
+
+function isKartiEkle(id, url) {
+  const kart = document.createElement("div");
+  kart.className = "kart is";
+  kart.innerHTML = `<div class="baslik"></div><div class="cubuk"><div></div></div><div class="durum">Sırada</div><div class="linkler"></div>`;
+  kart.querySelector(".baslik").textContent = url;
+  $("isler").prepend(kart);
+  izle(id, kart);
+}
+
+async function izle(id, kart) {
+  const r = await fetch(`/api/durum/${id}`);
+  const v = await r.json();
+  if (v.baslik) kart.querySelector(".baslik").textContent = v.baslik;
+  kart.querySelector(".cubuk > div").style.width = (v.yuzde || 0) + "%";
+  let metin = DURUMLAR[v.durum] || v.durum;
+  if (v.durum === "indiriliyor" && v.yuzde != null) metin += ` · %${v.yuzde}`;
+  if (v.durum === "hata") metin += `: ${v.hata}`;
+  kart.querySelector(".durum").textContent = metin;
+
+  if (v.durum === "bitti") {
+    const kutu = kart.querySelector(".linkler");
+    v.dosyalar.forEach((ad, i) => {
+      const a = document.createElement("a");
+      a.href = `/dosya/${id}/${i}`;
+      a.textContent = "⬇ " + ad;
+      a.style.display = "block";
+      kutu.appendChild(a);
+    });
+    return;
+  }
+  if (v.durum !== "hata") setTimeout(() => izle(id, kart), 800);
+}
+</script>
+</body>
+</html>
